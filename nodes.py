@@ -14,7 +14,7 @@ class FusenchatPromptChips:
                 "chip_data": (
                     "STRING",
                     {
-                        "default": '{"version":1,"chips":[]}',
+                        "default": '{"version":1,"singleSelect":false,"chips":[]}',
                         "multiline": False,
                         "dynamicPrompts": False,
                     },

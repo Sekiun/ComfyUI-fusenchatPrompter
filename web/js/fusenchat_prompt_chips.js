@@ -4,7 +4,7 @@ import { readFusenchatText } from "./png_metadata.mjs";
 const EXTENSION_NAME = "fusenchat.prompt-chips";
 const NODE_NAME = "FusenchatPromptChips";
 const PROMPT_SEPARATOR = " ";
-const EMPTY_CHIP_DATA = '{"version":1,"chips":[]}';
+const EMPTY_CHIP_DATA = '{"version":1,"singleSelect":false,"chips":[]}';
 
 function buildPrompt(items) {
     return items
@@ -38,45 +38,53 @@ function installStyles() {
             overflow: hidden;
         }
         .fusenchat-chips * { box-sizing: border-box; }
-        .fusenchat-toolbar {
+        .fusenchat-options {
             flex: 0 0 auto;
             display: flex;
-            align-items: stretch;
+            align-items: center;
             gap: 8px;
+            min-height: 24px;
         }
-        .fusenchat-drop {
-            flex: 1 1 auto;
-            min-height: 58px;
-            display: grid;
-            place-items: center;
-            padding: 9px 12px;
-            border: 1px dashed var(--fc-border);
-            border-radius: 10px;
-            background: color-mix(in srgb, var(--fc-panel) 84%, transparent);
+        .fusenchat-single-select {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
             cursor: pointer;
-            text-align: center;
-            transition: border-color 120ms ease, background 120ms ease;
+            user-select: none;
         }
-        .fusenchat-drop:hover,
-        .fusenchat-drop.is-over {
-            border-color: var(--fc-accent);
-            background: color-mix(in srgb, var(--fc-accent) 13%, var(--fc-panel));
+        .fusenchat-single-select input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
         }
-        .fusenchat-drop strong {
-            display: block;
-            color: #f0bd68;
-            font-size: 13px;
-        }
-        .fusenchat-clear {
-            flex: 0 0 auto;
-            padding: 0 12px;
+        .fusenchat-switch {
+            position: relative;
+            width: 30px;
+            height: 17px;
             border: 1px solid var(--fc-border);
-            border-radius: 10px;
+            border-radius: 999px;
             background: var(--fc-panel);
-            color: inherit;
-            cursor: pointer;
+            transition: background 120ms ease, border-color 120ms ease;
         }
-        .fusenchat-clear:hover { border-color: #c45a4e; }
+        .fusenchat-switch::after {
+            content: "";
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            background: color-mix(in srgb, currentColor 70%, transparent);
+            transition: transform 120ms ease, background 120ms ease;
+        }
+        .fusenchat-single-select input:checked + .fusenchat-switch {
+            border-color: var(--fc-accent);
+            background: color-mix(in srgb, var(--fc-accent) 25%, var(--fc-panel));
+        }
+        .fusenchat-single-select input:checked + .fusenchat-switch::after {
+            transform: translateX(13px);
+            background: var(--fc-accent);
+        }
         .fusenchat-list {
             flex: 1 1 auto;
             min-height: 160px;
@@ -240,28 +248,42 @@ function hideSerializedWidget(widget) {
 
 function parseChipData(value) {
     if (!value) {
-        return [];
+        return {
+            chips: [],
+            singleSelect: false,
+        };
     }
 
     try {
         const parsed = JSON.parse(value);
         if (parsed?.version !== 1 || !Array.isArray(parsed.chips)) {
-            return [];
+            return {
+                chips: [],
+                singleSelect: false,
+            };
         }
-        return parsed.chips
+        const chips = parsed.chips
             .map((chip) => ({
                 text: typeof chip?.text === "string" ? chip.text : "",
                 disabled: chip?.disabled === true,
             }))
             .filter((chip) => chip.text.length > 0);
+        return {
+            chips,
+            singleSelect: parsed.singleSelect === true,
+        };
     } catch {
-        return [];
+        return {
+            chips: [],
+            singleSelect: false,
+        };
     }
 }
 
-function serializeChipData(items) {
+function serializeChipData(items, singleSelect) {
     return JSON.stringify({
         version: 1,
+        singleSelect: singleSelect === true,
         chips: items.map((item) => ({
             text: item.text,
             disabled: item.disabled === true,
@@ -274,25 +296,22 @@ function createUi(node, promptWidget, chipDataWidget) {
         items: [],
         pointerDrag: null,
         nextId: 1,
+        singleSelect: false,
     };
 
     const root = createElement("div", "fusenchat-chips");
-    const toolbar = createElement("div", "fusenchat-toolbar");
-    const dropZone = createElement("div", "fusenchat-drop");
-    dropZone.innerHTML =
-        "<div><strong>fusenchat PNGをドロップ</strong>クリックして複数選択もできます</div>";
-    const clearButton = createElement("button", "fusenchat-clear", "すべて削除");
-    clearButton.type = "button";
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = "image/png,.png";
-    fileInput.multiple = true;
-    fileInput.hidden = true;
+    const options = createElement("div", "fusenchat-options");
+    const singleSelectLabel = createElement("label", "fusenchat-single-select");
+    const singleSelectInput = document.createElement("input");
+    singleSelectInput.type = "checkbox";
+    const singleSelectSwitch = createElement("span", "fusenchat-switch");
+    const singleSelectText = createElement("span", "", "単一選択モード");
+    singleSelectLabel.append(singleSelectInput, singleSelectSwitch, singleSelectText);
+    options.append(singleSelectLabel);
     const list = createElement("div", "fusenchat-list");
     const status = createElement("div", "fusenchat-status");
 
-    toolbar.append(dropZone, clearButton);
-    root.append(toolbar, fileInput, list, status);
+    root.append(options, list, status);
 
     function setStatus(message, isError = false) {
         status.textContent = message;
@@ -305,7 +324,7 @@ function createUi(node, promptWidget, chipDataWidget) {
 
     function syncWidgets() {
         promptWidget.value = buildPrompt(state.items);
-        chipDataWidget.value = serializeChipData(state.items);
+        chipDataWidget.value = serializeChipData(state.items, state.singleSelect);
         notifyWidget(promptWidget);
         notifyWidget(chipDataWidget);
         const enabledCount = state.items.filter((item) => !item.disabled).length;
@@ -316,13 +335,31 @@ function createUi(node, promptWidget, chipDataWidget) {
         node.graph?.change?.();
     }
 
+    function enforceSingleSelection(preferredId = null) {
+        if (!state.singleSelect || state.items.length === 0) {
+            return;
+        }
+
+        let selected = state.items.find((item) => item.id === preferredId);
+        if (!selected) {
+            selected = state.items.find((item) => !item.disabled) ?? state.items[0];
+        }
+        for (const item of state.items) {
+            item.disabled = item.id !== selected.id;
+        }
+    }
+
     function restoreFromWorkflow() {
-        const restoredChips = parseChipData(chipDataWidget.value);
-        state.items = restoredChips.map((chip) => ({
+        const restored = parseChipData(chipDataWidget.value);
+        state.singleSelect = restored.singleSelect;
+        singleSelectInput.checked = state.singleSelect;
+        state.items = restored.chips.map((chip) => ({
             id: state.nextId++,
             text: chip.text,
             disabled: chip.disabled,
         }));
+        enforceSingleSelection();
+        chipDataWidget.value = serializeChipData(state.items, state.singleSelect);
         renderItems();
 
         if (state.items.length > 0) {
@@ -343,7 +380,11 @@ function createUi(node, promptWidget, chipDataWidget) {
         if (index < 0) {
             return;
         }
+        const wasEnabled = !state.items[index].disabled;
         state.items.splice(index, 1);
+        if (state.singleSelect && wasEnabled) {
+            enforceSingleSelection();
+        }
         renderItems();
         syncWidgets();
     }
@@ -353,7 +394,20 @@ function createUi(node, promptWidget, chipDataWidget) {
         if (!item) {
             return;
         }
-        item.disabled = !item.disabled;
+        if (state.singleSelect) {
+            enforceSingleSelection(item.id);
+        } else {
+            item.disabled = !item.disabled;
+        }
+        renderItems();
+        syncWidgets();
+    }
+
+    function setSingleSelect(enabled) {
+        state.singleSelect = enabled;
+        if (enabled) {
+            enforceSingleSelection();
+        }
         renderItems();
         syncWidgets();
     }
@@ -547,7 +601,7 @@ function createUi(node, promptWidget, chipDataWidget) {
                 createElement(
                     "div",
                     "fusenchat-empty",
-                    "画像を追加するとメタデータ本文のチップがここに並びます",
+                    "fusenchat PNGをノードへドロップ",
                 ),
             );
             return;
@@ -562,10 +616,22 @@ function createUi(node, promptWidget, chipDataWidget) {
             const actions = createElement("span", "fusenchat-chip-actions");
             const toggle = createElement("button", "fusenchat-toggle", "●");
             toggle.type = "button";
-            toggle.title = item.disabled ? "有効化" : "無効化";
+            toggle.title = state.singleSelect
+                ? item.disabled
+                    ? "このチップを選択"
+                    : "選択中"
+                : item.disabled
+                  ? "有効化"
+                  : "無効化";
             toggle.setAttribute(
                 "aria-label",
-                item.disabled ? "プロンプトを有効化" : "プロンプトを無効化",
+                state.singleSelect
+                    ? item.disabled
+                        ? "このプロンプトを選択"
+                        : "選択中のプロンプト"
+                    : item.disabled
+                      ? "プロンプトを有効化"
+                      : "プロンプトを無効化",
             );
             toggle.classList.toggle("is-disabled", item.disabled === true);
             toggle.addEventListener("click", (event) => {
@@ -621,6 +687,7 @@ function createUi(node, promptWidget, chipDataWidget) {
 
         let added = 0;
         const errors = [];
+        const previouslyEnabledId = state.items.find((item) => !item.disabled)?.id ?? null;
         for (const file of pngFiles) {
             try {
                 const text = await readFusenchatText(file);
@@ -636,6 +703,9 @@ function createUi(node, promptWidget, chipDataWidget) {
         }
 
         if (added > 0) {
+            if (state.singleSelect) {
+                enforceSingleSelection(previouslyEnabledId);
+            }
             renderItems();
             syncWidgets();
         }
@@ -650,24 +720,10 @@ function createUi(node, promptWidget, chipDataWidget) {
         event.stopPropagation();
     }
 
-    dropZone.addEventListener("click", () => fileInput.click());
-    fileInput.addEventListener("change", async () => {
-        await addFiles(fileInput.files);
-        fileInput.value = "";
-    });
-    for (const eventName of ["dragenter", "dragover"]) {
+    for (const eventName of ["dragenter", "dragover", "dragleave", "drop"]) {
         root.addEventListener(eventName, (event) => {
             if (event.dataTransfer?.types?.includes("Files")) {
                 preventFileDropDefaults(event);
-                dropZone.classList.add("is-over");
-            }
-        });
-    }
-    for (const eventName of ["dragleave", "drop"]) {
-        root.addEventListener(eventName, (event) => {
-            if (event.dataTransfer?.types?.includes("Files")) {
-                preventFileDropDefaults(event);
-                dropZone.classList.remove("is-over");
             }
         });
     }
@@ -676,10 +732,8 @@ function createUi(node, promptWidget, chipDataWidget) {
             await addFiles(event.dataTransfer.files);
         }
     });
-    clearButton.addEventListener("click", () => {
-        state.items = [];
-        renderItems();
-        syncWidgets();
+    singleSelectInput.addEventListener("change", () => {
+        setSingleSelect(singleSelectInput.checked);
     });
 
     restoreFromWorkflow();
@@ -726,13 +780,13 @@ app.registerExtension({
             const domWidget = this.addDOMWidget("fusenchat_chips", "dom", ui.root, {
                 serialize: false,
                 hideOnZoom: false,
-                getMinHeight: () => 220,
+                getMinHeight: () => 150,
             });
             domWidget.serialize = false;
             if (typeof domWidget.computeLayoutSize !== "function") {
                 domWidget.computeSize = (width) => [
                     width,
-                    Math.max(220, this.size[1] - 60),
+                    Math.max(150, this.size[1] - 60),
                 ];
             }
 
@@ -759,7 +813,7 @@ app.registerExtension({
                 return true;
             };
 
-            this.setSize([520, 430]);
+            this.setSize([520, 300]);
         };
 
         const originalOnConfigure = nodeType.prototype.onConfigure;
