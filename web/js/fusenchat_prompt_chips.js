@@ -198,6 +198,40 @@ function installStyles() {
             color: #fff;
             opacity: 1;
         }
+        .fusenchat-add {
+            flex: 0 0 auto;
+            width: 34px;
+            height: 34px;
+            padding: 0;
+            border: 1px dashed var(--fc-border);
+            border-radius: 7px;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            font: 400 20px/30px ui-sans-serif, system-ui, sans-serif;
+            opacity: .7;
+        }
+        .fusenchat-add:hover {
+            border-color: var(--fc-accent);
+            color: var(--fc-accent);
+            opacity: 1;
+        }
+        .fusenchat-add-editor {
+            flex: 1 1 220px;
+            min-width: 150px;
+            max-width: 100%;
+        }
+        .fusenchat-add-input {
+            width: 100%;
+            height: 34px;
+            padding: 7px 9px;
+            border: 1px solid var(--fc-accent);
+            border-radius: 7px;
+            outline: none;
+            background: var(--fc-panel);
+            color: inherit;
+            font: inherit;
+        }
         .fusenchat-status {
             flex: 0 0 auto;
             min-height: 17px;
@@ -412,6 +446,26 @@ function createUi(node, promptWidget, chipDataWidget) {
         syncWidgets();
     }
 
+    function addTextItem(text) {
+        const normalizedText = text.trim();
+        if (!normalizedText) {
+            return false;
+        }
+
+        const item = {
+            id: state.nextId++,
+            text: normalizedText,
+            disabled: false,
+        };
+        state.items.push(item);
+        if (state.singleSelect) {
+            enforceSingleSelection(item.id);
+        }
+        renderItems();
+        syncWidgets();
+        return true;
+    }
+
     function moveItem(sourceId, targetId, afterTarget) {
         const sourceIndex = state.items.findIndex((item) => item.id === sourceId);
         const targetIndex = state.items.findIndex((item) => item.id === targetId);
@@ -604,7 +658,6 @@ function createUi(node, promptWidget, chipDataWidget) {
                     "fusenchat PNGをノードへドロップ",
                 ),
             );
-            return;
         }
 
         state.items.forEach((item) => {
@@ -674,6 +727,46 @@ function createUi(node, promptWidget, chipDataWidget) {
             chip.append(text, actions);
             list.append(chip);
         });
+
+        const addButton = createElement("button", "fusenchat-add", "+");
+        addButton.type = "button";
+        addButton.title = "テキストタグを追加";
+        addButton.setAttribute("aria-label", "テキストタグを追加");
+        addButton.addEventListener("pointerdown", (event) => event.stopPropagation());
+        addButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+
+            const editor = createElement("div", "fusenchat-add-editor");
+            const input = document.createElement("input");
+            input.type = "text";
+            input.className = "fusenchat-add-input";
+            input.placeholder = "タグのテキストを入力";
+            input.setAttribute("aria-label", "追加するタグのテキスト");
+            input.addEventListener("pointerdown", (pointerEvent) => {
+                pointerEvent.stopPropagation();
+            });
+            input.addEventListener("keydown", (keyEvent) => {
+                keyEvent.stopPropagation();
+                if (keyEvent.key === "Enter" && !keyEvent.isComposing) {
+                    keyEvent.preventDefault();
+                    if (!addTextItem(input.value)) {
+                        renderItems();
+                    }
+                } else if (keyEvent.key === "Escape") {
+                    keyEvent.preventDefault();
+                    renderItems();
+                }
+            });
+            input.addEventListener("blur", () => {
+                if (editor.isConnected) {
+                    renderItems();
+                }
+            });
+            editor.append(input);
+            addButton.replaceWith(editor);
+            input.focus();
+        });
+        list.append(addButton);
     }
 
     async function addFiles(files) {
